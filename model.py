@@ -36,7 +36,7 @@ class E_GCL(nn.Module):
 
         # 坐标更新网络：生成坐标更新的标量权重（关键：无偏置保证等变性）
         layer = nn.Linear(hidden_nf, 1, bias=False)
-        torch.nn.init.xavier_uniform_(layer.weight, gain=0.001)  # 小的初始化权重确保稳定性
+        torch.nn.init.xavier_uniform_(layer.weight, gain=0.0001)  # 小的初始化权重确保稳定性
 
         coord_mlp = []
         coord_mlp.append(nn.Linear(hidden_nf, hidden_nf))
@@ -269,7 +269,9 @@ class VQEmbedding(nn.Module):
         M, D = self.embedding.weight.size()
         h_flat = h.detach().reshape(-1, D)
 
-        distances = torch.cdist(h_flat, self.embedding.weight, p=2) ** 2
+        h_flat = F.normalize(h_flat, dim=-1)
+        embedding_norm = F.normalize(self.embedding.weight, dim=-1)
+        distances = torch.cdist(h_flat, embedding_norm, p=2) ** 2
 
         indices = torch.argmin(distances.float(), dim=-1)
         
@@ -299,7 +301,7 @@ class Decoder(nn.Module):
 
     def forward(self, z, coords, edges, edge_attr=None):
         batch_size, max_seq_len = z.size(0), z.size(1)
-        
+
         z_flat = z.view(-1, z.size(-1))  # 展平为 (batch_size*max_seq_len, in_node_dim)
         coords_flat = coords.view(-1, coords.size(-1))  # 展平为 (batch_size*max_seq_len, 3)
 
