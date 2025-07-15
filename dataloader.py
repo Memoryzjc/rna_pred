@@ -2,7 +2,6 @@ import torch
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
 import os
-import pickle
 from tqdm import tqdm
 
 class RNADataset(Dataset):
@@ -24,7 +23,8 @@ class RNADataset(Dataset):
         
     def load_prediction_split_data(self):
         """
-        从prediction_split.pt文件加载数据\\
+        从prediction_split.pt文件加载数据
+        
         prediction_split.pt: dict[str, List[str]]
         """
         if self.data_path.endswith('.pt'):
@@ -126,12 +126,12 @@ def preprocess_data(data_list, atom_idx=11, device='cpu'):
     - atom_idx: int - 使用的原子索引，默认为11
 
     Returns:
-    - seq_batch: torch.tensor -> (batch_size, max_seq_len) 序列索引张量
-    - coords_batch: torch.tensor -> (batch_size, max_seq_len, 3) 坐标张量
-    - edges: List[torch.tensor] -> 边索引张量 [row_indices, col_indices]
-    - edge_attr: torch.tensor -> (num_edges, 1) 边属性张量
-    - seq_lengths: torch.tensor -> (batch_size,) 序列长度张量
-    - coord_mask: torch.tensor -> (batch_size, max_seq_len) 坐标掩码张量
+    - seq_batch: torch.LongTensor -> (batch_size, max_seq_len) 序列索引张量
+    - coords_batch: torch.Tensor -> (batch_size, max_seq_len, 3) 坐标张量
+    - edges: List[torch.Tensor] -> 边索引张量 [row_indices, col_indices]
+    - edge_attr: torch.Tensor -> (num_edges, 1) 边属性张量
+    - seq_lengths: torch.Tensor -> (batch_size,) 序列长度张量
+    - coord_mask: torch.Tensor -> (batch_size, max_seq_len) 坐标掩码张量
     """
     # RNA碱基到索引的映射
     base_to_idx = {'A': 0, 'U': 1, 'G': 2, 'C': 3, 'N': 4}
@@ -179,9 +179,9 @@ def preprocess_data(data_list, atom_idx=11, device='cpu'):
         coord_mask[:current_len] = True  # 前current_len个位置为有效
         coord_masks.append(coord_mask) 
 
-        # 填充坐标到最大长度（使用零向量填充替代NaN）
+        # 填充坐标到最大长度（使用零向量填充）
         if current_len < max_seq_len:
-            padding = torch.zeros((max_seq_len - current_len, 3))  # 使用零填充替代NaN
+            padding = torch.zeros((max_seq_len - current_len, 3))  # 使用零填充
             selected_coords = torch.cat([selected_coords, padding], dim=0)
 
         coordinates.append(selected_coords)
