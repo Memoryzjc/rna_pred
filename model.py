@@ -254,12 +254,14 @@ class VQEmbedding(nn.Module):
     Vector Quantization Embedding Layer
     向量量化嵌入层：将连续特征 h 映射到离散嵌入空间 hq
     """
-    def __init__(self, n_embeddings, embedding_dim, commitment_cost=0.25):
+    def __init__(self, n_embeddings, embedding_dim, commitment_cost=0.25, device='cpu'):
         super(VQEmbedding, self).__init__()
         self.commitment_cost = commitment_cost
         
         self.embedding = nn.Embedding(n_embeddings, embedding_dim)
         self.embedding.weight.data.uniform_(-1.0 / n_embeddings, 1.0 / n_embeddings)  # 初始化嵌入向量
+        
+        self.to(device)
 
 
     def forward(self, h):
@@ -296,13 +298,14 @@ class Decoder(nn.Module):
         self.to(device)
 
     def forward(self, z, coords, edges, edge_attr=None):
-        z_flat = z.view(-1, z.size(-1))  # 展平为 (batch_size*n_nodes, in_node_dim)
-        coords_flat = coords.view(-1, coords.size(-1))  # 展平为 (batch_size*n_nodes, 3)
+        batch_size, max_seq_len = z.size(0), z.size(1)
+        z_flat = z.view(-1, z.size(-1))  # 展平为 (batch_size*max_seq_len, in_node_dim)
+        coords_flat = coords.view(-1, coords.size(-1))  # 展平为 (batch_size*max_seq_len, 3)
 
         z_flat, coords_flat = self.decoder_egnn(z_flat, coords_flat, edges, edge_attr=edge_attr)
-        
-        z = z_flat.view(-1, coords.size(1), z_flat.size(-1))  # 恢复为 (batch_size, max_seq_len, out_node_dim)
-        coords = coords_flat.view(-1, coords.size(1), coords_flat.size(-1))  # 恢复为 (batch_size, max_seq_len, 3)
+
+        z = z_flat.view(-1, max_seq_len, z_flat.size(-1))  # 恢复为 (batch_size, max_seq_len, out_node_dim)
+        coords = coords_flat.view(-1, max_seq_len, coords_flat.size(-1))  # 恢复为 (batch_size, max_seq_len, 3)
 
         return z, coords
 
@@ -318,24 +321,33 @@ class VQEGNN(nn.Module):
         self.encoder = Encoder(seq_embedding_dim, hidden_dim, latent_dim, 
                                in_edge_dim=in_edge_dim, device=device, act_fn=act_fn, n_layers=n_layers,
                                residual=residual, attention=attention, normalize=normalize, tanh=tanh)
-        self.vq_embedding = VQEmbedding(n_embeddings, latent_dim, commitment_cost=commitment_cost)
+        self.vq_embedding = VQEmbedding(n_embeddings, latent_dim, commitment_cost=commitment_cost, device=device)
         self.decoder = Decoder(latent_dim, hidden_dim, out_node_dim, 
                                in_edge_dim=in_edge_dim, device=device, act_fn=act_fn, n_layers=n_layers,
                                residual=residual, attention=attention, normalize=normalize, tanh=tanh)
     
     def forward(self, seq, coords, edges, edge_attr=None):
+        # get dimensions
+        batch_size, max_seq_len = seq.size(0), seq.size(1)
+        
         # encoder
         # dimensions: seq: (batch_size, max_seq_len) -> h: (batch_size, max_seq_len, latent_dim)
         h, _ = self.encoder(seq, coords, edges, edge_attr)
+        if h.shape != (batch_size, max_seq_len, self.vq_embedding.embedding.weight.size(1)):
+            raise ValueError(f"Encoder output shape {h.shape} does not match expected shape {(batch_size, max_seq_len, self.vq_embedding.embedding.weight.size(1))}")
 
         # vector quantization
         # dimensions: h: (batch_size, max_seq_len, latent_dim) -> hq: (batch_size, max_seq_len, latent_dim)
         hq, commitment_loss, codebook_loss = self.vq_embedding(h)
+        if hq.shape != (batch_size, max_seq_len, self.vq_embedding.embedding.weight.size(1)):
+            raise ValueError(f"VQEmbedding output shape {hq.shape} does not match expected shape {(batch_size, max_seq_len, self.vq_embedding.embedding.weight.size(1))}")
 
         # decoder
         # dimensions: hq: (batch_size, max_seq_len, latent_dim) -> coords: (batch_size, max_seq_len, 3)
         noise_coords = torch.randn_like(coords)  # 使用随机噪声作为初始坐标
         _, coords = self.decoder(hq, noise_coords, edges, edge_attr)
+        if coords.shape != (batch_size, max_seq_len, 3):
+            raise ValueError(f"Decoder output shape {coords.shape} does not match expected shape {(batch_size, max_seq_len, 3)}")
 
         return coords, commitment_loss, codebook_loss
 

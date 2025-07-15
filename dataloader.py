@@ -54,6 +54,8 @@ class RNADataset(Dataset):
                         coords = loaded_data['coords']
                         if isinstance(coords, torch.Tensor):
                             coords = torch.nan_to_num(coords, nan=0.0)
+
+                    data.append(loaded_data)
                 else:
                     raise ValueError(f"数据列表中的元素应为字符串路径，但得到: {type(data_str)}")
         else:

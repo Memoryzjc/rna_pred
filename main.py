@@ -21,6 +21,7 @@ in_edge_dim = 1
 n_codebook_embeddings = 128
 output_node_dim = 16
 commitment_beta = 0.25
+egnn_layers = 1
 
 batch_size = 8
 lr_rate = 1e-4
@@ -30,23 +31,12 @@ print_step = 50
 
 cuda = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def collate_fn_vqegnn():
+def collate_fn_vqegnn(data_list):
     """
     Collate function for VQEGNN model.
     This function is used to preprocess the data before feeding it into the model.
     """
-    def collate_fn(batch):
-        return preprocess_data(batch, atom_idx=11, device=cuda)
-    return collate_fn
-
-train_dataset = RNADataset(dataset_path, split='train')
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn_vqegnn())
-
-val_dataset = RNADataset(dataset_path, split='val')
-val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn_vqegnn())
-
-test_dataset = RNADataset(dataset_path, split='test')
-test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn_vqegnn())
+    return preprocess_data(data_list, atom_idx=11, device=cuda)
 
 
 def find_alignment_kabsch(P: Tensor, Q: Tensor) -> Tuple[Tensor, Tensor]:
@@ -122,9 +112,19 @@ def calculate_rmsd_mask(pos: Tensor, ref: Tensor, mask: Tensor) -> Tensor:
     return rmsd
 
 def main():
+    # Load datasets
+    train_dataset = RNADataset(dataset_path, split='train')
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn_vqegnn)
+
+    val_dataset = RNADataset(dataset_path, split='val')
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn_vqegnn)
+
+    test_dataset = RNADataset(dataset_path, split='test')
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn_vqegnn)
+
     # Initialize model and optimizer
     model = VQEGNN(seq_embedding_dim, hidden_dim, latent_dim, output_node_dim, n_codebook_embeddings,
-               commitment_cost=commitment_beta, in_edge_dim=in_edge_dim, device=cuda)
+               commitment_cost=commitment_beta, in_edge_dim=in_edge_dim, device=cuda, n_layers=egnn_layers)
     optimizer = optim.Adam(model.parameters(), lr=lr_rate)
     
     print("Start training...")
@@ -142,6 +142,7 @@ def main():
             x_recon, commitment_loss, codebook_loss = model(seq, x, edges, edge_attr)
 
             # Calculate loss
+            x_recon = x_recon.view(-1, 3)  # Flatten the coordinates for RMSD calculation
             rmsd_loss = calculate_rmsd_mask(x_recon, x, coord_mask)
             loss = rmsd_loss + commitment_loss * commitment_beta + codebook_loss
             
@@ -169,6 +170,7 @@ def main():
                 x_recon, commitment_loss, codebook_loss = model(seq, x, edges, edge_attr)
 
                 # Calculate loss
+                x_recon = x_recon.view(-1, 3)
                 rmsd_loss = calculate_rmsd_mask(x_recon, x, coord_mask)
                 loss = rmsd_loss + commitment_loss * commitment_beta + codebook_loss
                 
@@ -215,6 +217,7 @@ def main():
             x_recon, commitment_loss, codebook_loss = model(seq, x, edges, edge_attr)
 
             # Calculate loss
+            x_recon = x_recon.view(-1, 3)
             rmsd_loss = calculate_rmsd_mask(x_recon, x, coord_mask)
             loss = rmsd_loss + commitment_loss * commitment_beta + codebook_loss
             
@@ -230,3 +233,6 @@ def main():
     print(f"Average Training Loss: {avg_train_loss:.4f}")
     print(f"Average Validation Loss: {avg_val_loss:.4f}")
     print("Average losses calculated.")
+
+if __name__ == "__main__":
+    main()
