@@ -343,7 +343,11 @@ class VQEGNN(nn.Module):
         
         # encoder
         # dimensions: seq: (batch_size, max_seq_len) -> h: (batch_size, max_seq_len, latent_dim)
-        h, _ = self.encoder(seq, coords, edges, edge_attr)
+        h, coords = self.encoder(seq, coords, edges, edge_attr)
+        # print("h mean:", h.mean().item())
+        # print("h std:", h.std().item())
+        # print("h max:", h.abs().max().item())
+        # print("h contains nan:", torch.isnan(h).any().item())
 
         # vector quantization
         # dimensions: h: (batch_size, max_seq_len, latent_dim) -> hq: (batch_size, max_seq_len, latent_dim)
@@ -352,7 +356,8 @@ class VQEGNN(nn.Module):
         # decoder
         # dimensions: hq: (batch_size, max_seq_len, latent_dim) -> coords: (batch_size, max_seq_len, 3)
         noise_coords = torch.randn_like(coords)  # 使用随机噪声作为初始坐标
-        _, coords = self.decoder(hq, noise_coords, edges, edge_attr)
+        coords = coords + noise_coords  # 将噪声添加到原始坐标上
+        _, coords = self.decoder(hq, coords, edges, edge_attr)
 
         return coords, commitment_loss, codebook_loss
 
