@@ -23,9 +23,12 @@ output_node_dim = 16
 commitment_beta = 0.25
 egnn_layers = 1
 
+tanh = True
+normalize = True
+
 batch_size = 8
-lr_rate = 1e-4
-epoches = 1000
+lr_rate = 1e-5
+epoches = 100
 
 print_step = 50
 
@@ -124,7 +127,7 @@ def main():
 
     # Initialize model and optimizer
     model = VQEGNN(seq_embedding_dim, hidden_dim, latent_dim, output_node_dim, n_codebook_embeddings,
-               commitment_cost=commitment_beta, in_edge_dim=in_edge_dim, device=cuda, n_layers=egnn_layers)
+               commitment_cost=commitment_beta, in_edge_dim=in_edge_dim, device=cuda, n_layers=egnn_layers, tanh=tanh, normalize=normalize)
     optimizer = optim.Adam(model.parameters(), lr=lr_rate)
     
     print("Start training...")
@@ -148,13 +151,15 @@ def main():
             
             # Backpropagation
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5)  # Gradient clipping
             optimizer.step()
             
             epoch_loss += loss.item()
 
-            print(f"Epoch [{epoch+1}/{epoches}], Batch [{i+1}/{len(train_loader)}]\n")
-            print(f"Loss: {loss.item():.4f}, RMSD Loss: {rmsd_loss.item():.4f}\n")
-            print(f"Commitment Loss: {commitment_loss.item():.4f}, Codebook Loss: {codebook_loss.item():.4f}")
+            if (i + 1) % print_step == 0:
+                print(f"Epoch [{epoch+1}/{epoches}], Batch [{i+1}/{len(train_loader)}]\n")
+                print(f"Loss: {loss.item():.4f}, RMSD Loss: {rmsd_loss.item():.4f}\n")
+                print(f"Commitment Loss: {commitment_loss.item():.4f}, Codebook Loss: {codebook_loss.item():.4f}")
 
         epoch_loss /= len(train_loader)
         train_losses.append(epoch_loss)

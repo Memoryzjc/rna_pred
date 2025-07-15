@@ -179,13 +179,15 @@ def preprocess_data(data_list, atom_idx=11, device='cpu'):
         current_len = selected_coords.size(0)
         coord_mask = torch.zeros(max_seq_len, dtype=torch.bool)
         coord_mask[:current_len] = True  # 前current_len个位置为有效
-        coord_masks.append(coord_mask) 
+        coord_masks.append(coord_mask)
 
-        # 填充坐标到最大长度（使用零向量填充）
+        # 填充坐标到最大长度（使NaN填充）
         if current_len < max_seq_len:
-            padding = torch.zeros((max_seq_len - current_len, 3))  # 使用零填充
+            padding = torch.full((max_seq_len - current_len, 3), float('nan'))  # 使用NaN填充
             selected_coords = torch.cat([selected_coords, padding], dim=0)
 
+        # Change all NaN values to 0.0
+        selected_coords = torch.nan_to_num(selected_coords, nan=0.0)
         coordinates.append(selected_coords)
     
     # 3. 转换为张量
