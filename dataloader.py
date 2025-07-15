@@ -131,7 +131,7 @@ def preprocess_data(data_list, atom_idx=11, device='cpu'):
     - edges: List[torch.Tensor] -> 边索引张量 [row_indices, col_indices]
     - edge_attr: torch.Tensor -> (num_edges, 1) 边属性张量
     - seq_lengths: torch.Tensor -> (batch_size,) 序列长度张量
-    - coord_mask: torch.Tensor -> (batch_size, max_seq_len) 坐标掩码张量
+    - coord_mask: torch.Tensor -> (batch_size, max_seq_len) 坐标掩码张量, 标识有效坐标位置
     """
     # RNA碱基到索引的映射
     base_to_idx = {'A': 0, 'U': 1, 'G': 2, 'C': 3, 'N': 4}
@@ -212,6 +212,4 @@ def preprocess_data(data_list, atom_idx=11, device='cpu'):
 
 
 if __name__ == "__main__":
-    data_path = './rna_database'
-
-    RNADataLoader = create_rna_dataloader(data_path)
+    pass
