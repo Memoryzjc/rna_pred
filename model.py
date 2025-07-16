@@ -339,6 +339,9 @@ class VQEGNN(nn.Module):
         # dimensions: seq: (batch_size, max_seq_len) -> h: (batch_size, max_seq_len, latent_dim)
         h, _ = self.encoder(seq, coords, edges, edge_attr)
 
+        # Layer Normalization
+        h = F.layer_norm(h, h.size()[1:])  # 对每个序列进行归一化
+
         # vector quantization
         # dimensions: h: (batch_size, max_seq_len, latent_dim) -> hq: (batch_size, max_seq_len, latent_dim)
         hq, commitment_loss, codebook_loss = self.vq_embedding(h)

@@ -28,7 +28,7 @@ normalize = True
 
 batch_size = 8
 lr_rate = 1e-4
-epoches = 300
+epoches = 100
 
 print_step = 50
 
