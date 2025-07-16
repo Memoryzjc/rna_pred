@@ -335,13 +335,9 @@ class VQEGNN(nn.Module):
                                normalize=normalize, tanh=tanh)
     
     def forward(self, seq, coords, edges, edge_attr=None):
-        # get dimensions
-        batch_size, max_seq_len = seq.size(0), seq.size(1)
-        
         # encoder
         # dimensions: seq: (batch_size, max_seq_len) -> h: (batch_size, max_seq_len, latent_dim)
         h, _ = self.encoder(seq, coords, edges, edge_attr)
-
 
         # vector quantization
         # dimensions: h: (batch_size, max_seq_len, latent_dim) -> hq: (batch_size, max_seq_len, latent_dim)
