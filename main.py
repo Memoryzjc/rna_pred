@@ -23,8 +23,8 @@ output_node_dim = 16
 commitment_beta = 0.25
 egnn_layers = 1
 
-tanh = True
-normalize = True
+tanh = False
+normalize = False
 
 batch_size = 8
 lr_rate = 1e-5
@@ -133,11 +133,14 @@ def main():
     print("Start training...")
     train_losses = list()
     val_losses = list()
+    train_rmsd_losses = list()
+    val_rmsd_losses = list()
     best_val_loss = float('inf')
 
     for epoch in range(epoches):
         model.train()
         epoch_loss = 0.0
+        epoch_rmsd_loss = 0.0
 
         for i, batch in enumerate(train_loader):
             optimizer.zero_grad()
@@ -155,12 +158,15 @@ def main():
             optimizer.step()
             
             epoch_loss += loss.item()
+            epoch_rmsd_loss += rmsd_loss.item()
 
             if (i + 1) % print_step == 0:
                 print(f"Epoch [{epoch+1}/{epoches}], Batch [{i+1}/{len(train_loader)}]\n")
                 print(f"Loss: {loss.item():.4f}, RMSD Loss: {rmsd_loss.item():.4f}\n")
                 print(f"Commitment Loss: {commitment_loss.item():.4f}, Codebook Loss: {codebook_loss.item():.4f}")
 
+        epoch_rmsd_loss /= len(train_loader)
+        train_rmsd_losses.append(epoch_rmsd_loss)
         epoch_loss /= len(train_loader)
         train_losses.append(epoch_loss)
 
@@ -169,6 +175,7 @@ def main():
         # Validation
         model.eval()
         val_loss = 0.0
+        val_rmsd_loss = 0.0
         with torch.no_grad():
             for j, val_batch in enumerate(val_loader):
                 seq, x, edges, edge_attr, seq_lengths, coord_mask = val_batch
@@ -180,9 +187,12 @@ def main():
                 loss = rmsd_loss + commitment_loss * commitment_beta + codebook_loss
                 
                 val_loss += loss.item()
+                val_rmsd_loss += rmsd_loss.item()
 
         val_loss /= len(val_loader)
         val_losses.append(val_loss)
+        val_rmsd_loss /= len(val_loader)
+        val_rmsd_losses.append(val_rmsd_loss)
 
         print(f"Epoch [{epoch+1}/{epoches}] Validation Loss: {val_loss:.4f}")
 
@@ -203,14 +213,28 @@ def main():
 
     # Plot training and validation losses
     plt.figure(figsize=(10, 5))
-    plt.plot(train_losses, label='Training Loss')
-    plt.plot(val_losses, label='Validation Loss')
+    # Use log scale for better visualization
+    plt.plot(train_losses, label='Training Loss', color='blue')
+    plt.plot(val_losses, label='Validation Loss', color='orange')
+    plt.plot(train_rmsd_losses, label='Training RMSD Loss', color='green', linestyle='--')
+    plt.plot(val_rmsd_losses, label='Validation RMSD Loss', color='red', linestyle='--')
+    plt.yscale('log')  # Log scale for better visibility of loss values
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
     plt.title('Training and Validation Losses')
     plt.legend()
     plt.savefig('loss_plot.png')
-    
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(train_losses[15:], label='Training Loss', color='blue')
+    plt.plot(val_losses[15:], label='Validation Loss', color='orange')
+    plt.plot(train_rmsd_losses[15:], label='Training RMSD Loss', color='green', linestyle='--')
+    plt.plot(val_rmsd_losses[15:], label='Validation RMSD Loss', color='red', linestyle='--')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Training and Validation RMSD Losses')
+    plt.legend()
+    plt.savefig('rmsd_loss_plot.png')
 
     # Load best model for testing
     model.load_state_dict(torch.load('best_model.pth'))
