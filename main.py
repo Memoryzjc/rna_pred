@@ -78,22 +78,6 @@ def find_alignment_kabsch(P: Tensor, Q: Tensor) -> Tuple[Tensor, Tensor]:
     t = t.T
     return R, t.squeeze()
 
-def calculate_rmsd(pos: Tensor, ref: Tensor) -> Tensor:
-    """
-    Calculate the root mean square deviation (RMSD) between two sets of points pos and ref.
-    Args:
-    pos (torch.Tensor): A tensor of shape (N, 3) representing the positions of the first set of points.
-    ref (torch.Tensor): A tensor of shape (N, 3) representing the positions of the second set of points.
-    Returns:
-    torch.Tensor: RMSD between the two sets of points.
-    """
-    if pos.shape[0] != ref.shape[0]:
-        raise ValueError("pos and ref must have the same number of points")
-    R, t = find_alignment_kabsch(ref, pos)
-    ref0 = (R @ ref.T).T + t
-    rmsd = torch.linalg.norm(ref0 - pos, dim=1).mean()
-    return rmsd
-
 def calculate_rmsd_mask(pos: Tensor, ref: Tensor, mask: Tensor) -> Tensor:
     """
     Calculate the root mean square deviation (RMSD) between two sets of points pos and ref, considering a mask.
@@ -113,6 +97,22 @@ def calculate_rmsd_mask(pos: Tensor, ref: Tensor, mask: Tensor) -> Tensor:
     ref0 = (R @ ref[mask].T).T + t
     rmsd = torch.linalg.norm(ref0 - pos[mask], dim=1).mean()
     return rmsd
+
+def calculate_rmsd_batch(pos_batch: Tensor, ref_batch: Tensor, mask_batch: Tensor) -> Tensor:
+    """
+    Calculate the root mean square deviation (RMSD) for a batch of point sets.
+    Args:
+    pos_batch (torch.Tensor): A tensor of shape (B, N, 3) representing the positions of the first set of points.
+    ref_batch (torch.Tensor): A tensor of shape (B, N, 3) representing the positions of the second set of points.
+    mask_batch (torch.Tensor): A boolean tensor of shape (B, N) indicating which points to consider in the RMSD calculation.
+    Returns:
+    torch.Tensor: RMSD for each sample in the batch.
+    """
+    rmsd_list = []
+    for pos, ref, mask in zip(pos_batch, ref_batch, mask_batch):
+        rmsd = calculate_rmsd_mask(pos, ref, mask)
+        rmsd_list.append(rmsd)
+    return torch.tensor(rmsd_list, device=pos_batch.device).mean()
 
 def main():
     # Load datasets

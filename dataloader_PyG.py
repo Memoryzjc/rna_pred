@@ -9,8 +9,8 @@ class RNAPyGDataset(Dataset):
         super().__init__(root, transform, pre_transform)
         self.root = root
         self.split = split
-        self.data_list = self.load_data()
         self.atom_idx = 11  # The index of the atom to use, e.g., 11 for C1'
+        self.data_list = self.load_data()
 
     def len(self):
         return len(self.data_list)
@@ -30,8 +30,10 @@ class RNAPyGDataset(Dataset):
             item = torch.load(data_path)
 
             seq = item['seq']
-            coords = item['coords']
-            coord = torch.nan_to_num(coords[:, self.atom_idx, :], nan=0.0)  # [seq_len, 3]
+            coords = item['coords'][:, self.atom_idx, :]  # Extract the coordinates for the specified atom
+            coords = torch.tensor(coords, dtype=torch.float) if not isinstance(coords, torch.Tensor) else coords
+
+            coord = torch.nan_to_num(coords, nan=0.0)  # [seq_len, 3]
 
             # Convert sequence to indices
             x = torch.tensor([self.base_to_idx(ch) for ch in seq], dtype=torch.long).unsqueeze(-1)  # [seq_len, 1]
@@ -39,7 +41,7 @@ class RNAPyGDataset(Dataset):
             # Build fully connected edges
             edge_index = self.get_fully_connected_edges(len(seq))
 
-            # Optionally add edge_attr as 1s
+            # all 1s for edge attributes
             edge_attr = torch.ones((edge_index.size(1), 1), dtype=torch.float)
 
             data = Data(x=x, pos=coord, edge_index=edge_index, edge_attr=edge_attr, seq=seq)

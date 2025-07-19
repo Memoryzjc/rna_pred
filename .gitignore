@@ -1,4 +1,5 @@
 rna_database
-__pychache__
+__pycache__
 .mypy_cache
 best_model.pt
+test.*

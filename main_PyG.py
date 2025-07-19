@@ -58,6 +58,7 @@ def main():
     model = VQEGNN(seq_embedding_dim=seq_embedding_dim, hidden_dim=hidden_dim, latent_dim=latent_dim,
                    out_node_dim=out_node_dim, n_embeddings=n_embeddings, commitment_cost=commitment_cost,
                    edge_dim=edge_dim, n_layers=n_layers).to(device)
+    
     optimizer = torch.optim.Adam(model.parameters(), lr=lr_rate)
 
     best_val_loss = float('inf')
@@ -69,9 +70,12 @@ def main():
         for batch in train_loader:
             batch = batch.to(device)
             optimizer.zero_grad()
+
             pred_pos, commitment_loss, codebook_loss = model(batch)
+            
             target_pos = batch.pos
             rmsd_loss = calculate_rmsd_mask(pred_pos, target_pos, batch.batch)
+            
             loss = rmsd_loss + commitment_loss + codebook_loss
             loss.backward()
             optimizer.step()
