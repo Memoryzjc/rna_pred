@@ -52,7 +52,7 @@ class EGNNLayer(MessagePassing):
                 nn.Linear(hidden_nf, 1),
                 nn.Sigmoid())  # 生成0-1之间的注意力权重
 
-    def forward(self, h, coords, edge_index, edge_attr=None):
+    def forward(self, h, coords, edge_index, edge_attr=None, valid_mask=None):
         """
         前向传播函数
         Args:
@@ -60,6 +60,7 @@ class EGNNLayer(MessagePassing):
             coords: 节点坐标 [num_nodes, 3]
             edge_index: 边索引 [2, num_edges]
             edge_attr: 边属性 [num_edges, edges_in_d] (可选)
+            valid_mask: 有效位置mask [num_nodes] (可选)
         Returns:
             updated_x: 更新后的节点特征
             updated_pos: 更新后的坐标
@@ -86,11 +87,17 @@ class EGNNLayer(MessagePassing):
             edge_attr=edge_attr, 
             coord_diff=coord_diff, 
             dist=dist,
+            valid_mask=valid_mask,
             size=None
         )
         
-        # 更新坐标
-        updated_coords = coords + coord_update
+        # 更新坐标，但只更新有效位置
+        updated_coords = coords.clone()
+        if valid_mask is not None:
+            # 只更新有效位置的坐标
+            updated_coords[valid_mask] = coords[valid_mask] + coord_update[valid_mask]
+        else:
+            updated_coords = coords + coord_update
 
         return updated_h, updated_coords
 
@@ -118,7 +125,7 @@ class EGNNLayer(MessagePassing):
         
         return edge_feat, coord_update
 
-    def aggregate(self, inputs, index, ptr=None, dim_size=None):
+    def aggregate(self, inputs, index, ptr=None, dim_size=None, valid_mask=None):
         """
         聚合函数：聚合来自邻居的消息
         """
@@ -134,6 +141,10 @@ class EGNNLayer(MessagePassing):
             agg_coord = scatter_mean(coord_update, index, dim=0, dim_size=dim_size)
         else:
             raise ValueError(f"Invalid coords_agg: {self.coords_agg}")
+        
+        # 如果有mask，将无效位置的坐标更新设为0
+        if valid_mask is not None:
+            agg_coord = agg_coord * valid_mask.unsqueeze(-1).float()
         
         return agg_feat, agg_coord
 
@@ -181,7 +192,7 @@ class EGNN(nn.Module):
         ])
         self.embedding_out = nn.Linear(hidden_dim, out_channels)
 
-    def forward(self, h, coords, edge_index, edge_attr=None):
+    def forward(self, h, coords, edge_index, edge_attr=None, valid_mask=None):
         """
         EGNN前向传播函数
         Args:
@@ -189,6 +200,7 @@ class EGNN(nn.Module):
             coords: 输入节点坐标 [num_nodes, 3] -> [batch_size*n_nodes, 3]
             edge_index: 边索引 [2, num_edges]
             edge_attr: 边属性 [num_edges, edge_dim] (可选)
+            valid_mask: 有效位置mask [num_nodes] (可选)
         Returns:
             h: 输出节点特征 [num_nodes, out_channels] -> [batch_size*n_nodes, out_channels]
             coords: 更新后的节点坐标 [num_nodes, 3] -> [batch_size*n_nodes, 3]
@@ -196,8 +208,7 @@ class EGNN(nn.Module):
         h = self.embedding_in(h)
 
         for layer in self.layers:
-            h, coords_update = layer(h, coords, edge_index, edge_attr)
-            coords = coords + coords_update
+            h, coords = layer(h, coords, edge_index, edge_attr, valid_mask)
 
         h = self.embedding_out(h)
         
@@ -226,11 +237,12 @@ class Encoder(nn.Module):
         coords = data.pos
         edge_index = data.edge_index
         edge_attr = data.edge_attr
+        valid_mask = getattr(data, 'valid_mask', None)  # 获取mask，如果没有则为None
 
         # dimensions:
         # h: [num_nodes, seq_embedding_dim]
         # coords: [num_nodes, 3]
-        h, coords = self.encoder_egnn(h, coords, edge_index, edge_attr)
+        h, coords = self.encoder_egnn(h, coords, edge_index, edge_attr, valid_mask)
         return h, coords
 
 
@@ -242,8 +254,8 @@ class Decoder(nn.Module):
         self.egnn = EGNN(in_node_dim, hidden_dim, out_node_dim, edge_dim=edge_dim, n_layers=n_layers,
                          act_fn=act_fn, residual=residual, attention=attention, normalize=normalize, tanh=tanh)
 
-    def forward(self, z, pos, edge_index, edge_attr=None):
-        return self.egnn(z, pos, edge_index, edge_attr)
+    def forward(self, z, pos, edge_index, edge_attr=None, valid_mask=None):
+        return self.egnn(z, pos, edge_index, edge_attr, valid_mask)
 
 
 class VQEmbedding(nn.Module):
@@ -251,17 +263,14 @@ class VQEmbedding(nn.Module):
         super(VQEmbedding, self).__init__()
         self.commitment_cost = commitment_cost
         self.embedding = nn.Embedding(n_embeddings, embedding_dim)
-        self.embedding.weight.data.uniform_(-1.0 / n_embeddings, 1.0 / n_embeddings)
 
     def forward(self, h):
         # 展平输入以便计算距离
-        original_shape = h.shape
         h_flat = h.detach().reshape(-1, h.size(-1))
-        
-        # 计算到码本向量的距离
+
         distances = torch.cdist(h_flat, self.embedding.weight, p=2) ** 2
         indices = torch.argmin(distances.float(), dim=-1)
-        quantized = self.embedding(indices).view(original_shape)
+        quantized = self.embedding(indices).view(h.shape)
 
         # 计算损失
         codebook_loss = F.mse_loss(h.detach(), quantized)
@@ -285,17 +294,46 @@ class VQEGNN(nn.Module):
                                act_fn=act_fn, residual=residual, attention=attention, normalize=normalize, tanh=tanh)
 
     def forward(self, data):
+        # 获取mask
+        valid_mask = getattr(data, 'valid_mask', None)
+        
         # 编码
         h, _ = self.encoder(data)
+        if h.isnan().any():
+            raise ValueError("Encoded features contain NaN values, check the input data or model parameters.")
         
-        # 层归一化
-        h = F.layer_norm(h, h.size()[1:])
+        # 层归一化（只对有效位置）
+        if valid_mask is not None:
+            # 对每个有效位置进行归一化
+            h_normalized = h.clone()
+            h_normalized[valid_mask] = F.layer_norm(h[valid_mask], h.size()[1:])
+            h = h_normalized
+        else:
+            h = F.layer_norm(h, h.size()[1:])
         
         # 向量量化
         hq, commitment_loss, codebook_loss = self.vq_embedding(h)
+        if commitment_loss.isnan() or codebook_loss.isnan():
+            raise ValueError("Commitment loss or codebook loss is NaN, check the input data or model parameters.")
         
-        # 解码（使用随机初始坐标）
-        init_pos = torch.randn_like(data.pos)
-        _, pos_recon = self.decoder(hq, init_pos, data.edge_index, data.edge_attr)
+        # 解码
+        init_pos = torch.rand_like(data.pos, device=data.x.device)  # 使用随机初始化位置
+        if valid_mask is not None:
+            # 只对有效位置进行初始化
+            init_pos[valid_mask] = data.pos[valid_mask]
+
+        _, pos_recon = self.decoder(hq, init_pos, data.edge_index, data.edge_attr, valid_mask)
+        
+        # 确保无效位置保持为NaN或原始值
+        if valid_mask is not None and hasattr(data, 'original_pos'):
+            # 将无效位置设置回原始值（包含NaN）
+            pos_recon = pos_recon.clone()
+            pos_recon[~valid_mask] = data.original_pos[~valid_mask]
+        
+        if pos_recon.isnan().any() and valid_mask is not None:
+            # 检查是否只有无效位置包含NaN（这是期望的）
+            valid_pos_has_nan = pos_recon[valid_mask].isnan().any()
+            if valid_pos_has_nan:
+                raise ValueError("Reconstructed positions contain NaN values in valid positions, check the input data or model parameters.")
         
         return pos_recon, commitment_loss, codebook_loss

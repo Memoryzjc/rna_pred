@@ -33,18 +33,27 @@ class RNAPyGDataset(Dataset):
             coords = item['coords'][:, self.atom_idx, :]  # Extract the coordinates for the specified atom
             coords = torch.tensor(coords, dtype=torch.float) if not isinstance(coords, torch.Tensor) else coords
 
-            coord = torch.nan_to_num(coords, nan=0.0)  # [seq_len, 3]
+            # Create valid mask (True for valid positions, False for NaN)
+            valid_mask = ~torch.isnan(coords).any(dim=1)  # [seq_len]
 
             # Convert sequence to indices
             x = torch.tensor([self.base_to_idx(ch) for ch in seq], dtype=torch.long).unsqueeze(-1)  # [seq_len, 1]
 
-            # Build fully connected edges
-            edge_index = self.get_fully_connected_edges(len(seq))
+            # Build fully connected edges only between valid nodes
+            edge_index = self.get_fully_connected_edges_with_mask(len(seq), valid_mask)
 
             # all 1s for edge attributes
             edge_attr = torch.ones((edge_index.size(1), 1), dtype=torch.float)
 
-            data = Data(x=x, pos=coord, edge_index=edge_index, edge_attr=edge_attr, seq=seq)
+            data = Data(
+                x=x, 
+                pos=coords, 
+                edge_index=edge_index, 
+                edge_attr=edge_attr, 
+                seq=seq, 
+                valid_mask=valid_mask,  # 有效位置的mask
+                original_pos=coords    # 保存原始坐标（包含NaN）用于验证
+            )
             data_list.append(data)
         return data_list
 
@@ -55,4 +64,29 @@ class RNAPyGDataset(Dataset):
     @staticmethod
     def get_fully_connected_edges(n):
         row, col = zip(*[(i, j) for i in range(n) for j in range(n) if i != j])
+        return torch.tensor([row, col], dtype=torch.long)
+    
+    @staticmethod
+    def get_fully_connected_edges_with_mask(n, valid_mask):
+        """
+        Create fully connected edges only between valid (non-NaN) nodes
+        Args:
+            n: total number of nodes
+            valid_mask: boolean tensor [n] where True indicates valid nodes
+        Returns:
+            edge_index: [2, num_edges] tensor of edge indices
+        """
+        valid_indices = torch.where(valid_mask)[0]
+        
+        if len(valid_indices) < 2:
+            # Return empty edges if less than 2 valid nodes
+            return torch.zeros((2, 0), dtype=torch.long)
+        
+        row, col = [], []
+        for i in valid_indices:
+            for j in valid_indices:
+                if i != j:
+                    row.append(i.item())
+                    col.append(j.item())
+        
         return torch.tensor([row, col], dtype=torch.long)
